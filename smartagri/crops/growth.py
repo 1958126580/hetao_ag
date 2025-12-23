@@ -162,6 +162,218 @@ class SimulationResult:
         }
 
 
+class GrowingDegreeDays:
+    """
+    Growing Degree Days (GDD) calculation.
+
+    Calculates thermal time accumulation for crop development,
+    supporting various calculation methods.
+
+    Example:
+        >>> gdd_calc = GrowingDegreeDays(base_temp=10.0)
+        >>> daily_gdd = gdd_calc.calculate(t_max, t_min)
+        >>> cumulative_gdd = gdd_calc.cumulative(t_max, t_min)
+    """
+
+    def __init__(
+        self,
+        base_temp: float = 10.0,
+        upper_temp: float = 30.0,
+        method: str = "average",
+    ):
+        """
+        Initialize GDD calculator.
+
+        Args:
+            base_temp: Base temperature for growth (°C)
+            upper_temp: Upper temperature threshold (°C)
+            method: Calculation method ('average', 'modified', 'sine')
+        """
+        self.base_temp = base_temp
+        self.upper_temp = upper_temp
+        self.method = method
+
+    def calculate(
+        self,
+        t_max: np.ndarray,
+        t_min: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Calculate daily GDD values.
+
+        Args:
+            t_max: Daily maximum temperatures (°C)
+            t_min: Daily minimum temperatures (°C)
+
+        Returns:
+            Array of daily GDD values
+        """
+        t_max = np.asarray(t_max)
+        t_min = np.asarray(t_min)
+
+        if self.method == "average":
+            # Simple average method
+            t_avg = (t_max + t_min) / 2
+            gdd = np.maximum(t_avg - self.base_temp, 0)
+        elif self.method == "modified":
+            # Modified method with upper threshold
+            t_max_adj = np.minimum(t_max, self.upper_temp)
+            t_min_adj = np.maximum(t_min, self.base_temp)
+            t_min_adj = np.minimum(t_min_adj, t_max_adj)
+            t_avg = (t_max_adj + t_min_adj) / 2
+            gdd = np.maximum(t_avg - self.base_temp, 0)
+        else:
+            # Default to average method
+            t_avg = (t_max + t_min) / 2
+            gdd = np.maximum(t_avg - self.base_temp, 0)
+
+        return gdd
+
+    def cumulative(
+        self,
+        t_max: np.ndarray,
+        t_min: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Calculate cumulative GDD.
+
+        Args:
+            t_max: Daily maximum temperatures (°C)
+            t_min: Daily minimum temperatures (°C)
+
+        Returns:
+            Array of cumulative GDD values
+        """
+        daily_gdd = self.calculate(t_max, t_min)
+        return np.cumsum(daily_gdd)
+
+    def days_to_accumulate(
+        self,
+        target_gdd: float,
+        t_max: np.ndarray,
+        t_min: np.ndarray,
+        start_idx: int = 0,
+    ) -> Optional[int]:
+        """
+        Calculate days to reach target GDD.
+
+        Args:
+            target_gdd: Target GDD accumulation
+            t_max: Daily maximum temperatures
+            t_min: Daily minimum temperatures
+            start_idx: Starting index
+
+        Returns:
+            Number of days or None if not reached
+        """
+        cumulative = self.cumulative(t_max[start_idx:], t_min[start_idx:])
+        indices = np.where(cumulative >= target_gdd)[0]
+
+        if len(indices) > 0:
+            return int(indices[0]) + 1
+        return None
+
+
+class BiomassModel:
+    """
+    Biomass accumulation model based on radiation use efficiency.
+
+    Calculates daily biomass production from solar radiation and LAI.
+
+    Example:
+        >>> model = BiomassModel(radiation_use_efficiency=3.5)
+        >>> daily = model.daily_accumulation(solar_radiation, lai)
+    """
+
+    def __init__(
+        self,
+        radiation_use_efficiency: float = 3.0,
+        extinction_coefficient: float = 0.6,
+    ):
+        """
+        Initialize biomass model.
+
+        Args:
+            radiation_use_efficiency: RUE (g/MJ)
+            extinction_coefficient: Light extinction coefficient
+        """
+        self.rue = radiation_use_efficiency
+        self.extinction_coef = extinction_coefficient
+
+    def intercepted_radiation(
+        self,
+        solar_radiation: np.ndarray,
+        lai: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Calculate intercepted photosynthetically active radiation.
+
+        Args:
+            solar_radiation: Daily solar radiation (MJ/m²/day)
+            lai: Leaf area index
+
+        Returns:
+            Intercepted PAR (MJ/m²/day)
+        """
+        solar_radiation = np.asarray(solar_radiation)
+        lai = np.asarray(lai)
+
+        # PAR is ~50% of total solar radiation
+        par = solar_radiation * 0.5
+
+        # Beer-Lambert law
+        f_int = 1 - np.exp(-self.extinction_coef * lai)
+
+        return par * f_int
+
+    def daily_accumulation(
+        self,
+        solar_radiation: np.ndarray,
+        lai: np.ndarray,
+        stress_factor: Union[float, np.ndarray] = 1.0,
+    ) -> np.ndarray:
+        """
+        Calculate daily biomass accumulation.
+
+        Args:
+            solar_radiation: Daily solar radiation (MJ/m²/day)
+            lai: Leaf area index
+            stress_factor: Combined stress factor (0-1)
+
+        Returns:
+            Daily biomass accumulation (kg/ha)
+        """
+        ipar = self.intercepted_radiation(solar_radiation, lai)
+
+        # Stress-adjusted RUE
+        effective_rue = self.rue * stress_factor
+
+        # Convert g/m² to kg/ha (multiply by 10)
+        biomass = ipar * effective_rue * 10
+
+        return np.maximum(biomass, 0)
+
+    def total_biomass(
+        self,
+        solar_radiation: np.ndarray,
+        lai: np.ndarray,
+        stress_factor: Union[float, np.ndarray] = 1.0,
+    ) -> float:
+        """
+        Calculate total accumulated biomass.
+
+        Args:
+            solar_radiation: Daily solar radiation (MJ/m²/day)
+            lai: Leaf area index
+            stress_factor: Combined stress factor (0-1)
+
+        Returns:
+            Total biomass (kg/ha)
+        """
+        daily = self.daily_accumulation(solar_radiation, lai, stress_factor)
+        return float(np.sum(daily))
+
+
 class PhenologyModel:
     """
     Crop phenology model based on thermal time.
@@ -170,7 +382,7 @@ class PhenologyModel:
     with optional photoperiod sensitivity.
 
     Example:
-        >>> phenology = PhenologyModel(crop="wheat")
+        >>> phenology = PhenologyModel(crop_type="wheat")
         >>> stage = phenology.get_stage(gdd=500)
         >>> days_to_flower = phenology.days_to_stage(
         ...     current_gdd=300,
@@ -182,6 +394,7 @@ class PhenologyModel:
     def __init__(
         self,
         crop: str = "generic",
+        crop_type: str = None,
         params: Optional[GrowthParameters] = None,
     ):
         """
@@ -189,9 +402,10 @@ class PhenologyModel:
 
         Args:
             crop: Crop name
+            crop_type: Alternative crop name parameter
             params: Growth parameters (uses defaults if None)
         """
-        self.crop = crop
+        self.crop = crop_type if crop_type is not None else crop
         self.params = params or GrowthParameters()
 
         # GDD thresholds for stage transitions
@@ -210,15 +424,16 @@ class PhenologyModel:
             GrowthStage.HARVEST: self.params.gdd_maturity * 1.1,
         }
 
-    def get_stage(self, gdd: float) -> GrowthStage:
+    def get_stage(self, gdd: float, return_enum: bool = False) -> Union[str, GrowthStage]:
         """
         Get growth stage for given GDD.
 
         Args:
             gdd: Accumulated growing degree days
+            return_enum: If True, return GrowthStage enum; else return string
 
         Returns:
-            Current growth stage
+            Current growth stage (string or enum)
         """
         current_stage = GrowthStage.GERMINATION
 
@@ -226,7 +441,9 @@ class PhenologyModel:
             if gdd >= threshold:
                 current_stage = stage
 
-        return current_stage
+        if return_enum:
+            return current_stage
+        return current_stage.name.lower().replace('_', ' ')
 
     def stage_progress(self, gdd: float) -> Tuple[GrowthStage, float]:
         """

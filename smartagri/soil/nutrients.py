@@ -101,6 +101,124 @@ class FertilizerRecommendation:
         return cost
 
 
+class NutrientRecommender:
+    """
+    Simplified nutrient recommender for quick fertilizer estimates.
+
+    Provides quick fertilizer recommendations based on
+    crop type and soil nutrient levels.
+
+    Example:
+        >>> recommender = NutrientRecommender(crop_type='corn')
+        >>> rec = recommender.recommend(soil_n=25, soil_p=15, soil_k=120)
+    """
+
+    def __init__(
+        self,
+        crop_type: str = "corn",
+        target_yield: float = 10000,
+    ):
+        """
+        Initialize recommender.
+
+        Args:
+            crop_type: Crop type
+            target_yield: Target yield (kg/ha)
+        """
+        self.crop_type = crop_type.lower()
+        self.target_yield = target_yield
+
+        # Crop nutrient requirements (kg per ton yield)
+        self._requirements = {
+            "corn": {"N": 22, "P2O5": 9, "K2O": 6},
+            "wheat": {"N": 25, "P2O5": 11, "K2O": 6},
+            "soybean": {"N": 0, "P2O5": 14, "K2O": 24},
+            "rice": {"N": 18, "P2O5": 8, "K2O": 4},
+        }
+
+    def recommend(
+        self,
+        soil_n: float = 0,
+        soil_p: float = 0,
+        soil_k: float = 0,
+        crop_type: str = None,
+    ) -> Dict[str, float]:
+        """
+        Generate fertilizer recommendations.
+
+        Args:
+            soil_n: Soil available N (kg/ha)
+            soil_p: Soil available P (mg/kg)
+            soil_k: Soil available K (mg/kg)
+            crop_type: Override crop type
+
+        Returns:
+            Dict with N, P2O5, K2O recommendations (kg/ha)
+        """
+        crop = crop_type or self.crop_type
+        reqs = self._requirements.get(crop, self._requirements["corn"])
+        yield_t = self.target_yield / 1000
+
+        # Calculate requirements
+        n_need = reqs["N"] * yield_t - soil_n * 0.5
+        p_need = reqs["P2O5"] * yield_t - soil_p * 0.3
+        k_need = reqs["K2O"] * yield_t - soil_k * 0.2
+
+        return {
+            "N": max(0, n_need),
+            "P2O5": max(0, p_need),
+            "K2O": max(0, k_need),
+        }
+
+    def calculate(
+        self,
+        soil_test: Dict[str, float],
+        crop_requirements: Dict[str, Any],
+    ) -> Dict[str, float]:
+        """
+        Calculate fertilizer recommendations from soil test and crop requirements.
+
+        Args:
+            soil_test: Dict with nitrogen, phosphorus, potassium, ph, organic_matter
+            crop_requirements: Dict with crop, yield_target
+
+        Returns:
+            Dict with N, P2O5, K2O, lime recommendations (kg/ha)
+        """
+        crop = crop_requirements.get('crop', self.crop_type)
+        yield_target = crop_requirements.get('yield_target', self.target_yield / 1000)
+
+        reqs = self._requirements.get(crop.lower(), self._requirements["corn"])
+
+        # Extract soil values
+        soil_n = soil_test.get('nitrogen', 0)
+        soil_p = soil_test.get('phosphorus', 0)
+        soil_k = soil_test.get('potassium', 0)
+        ph = soil_test.get('ph', 6.5)
+        om = soil_test.get('organic_matter', 2.5)
+
+        # Calculate requirements
+        n_need = reqs["N"] * yield_target - soil_n * 0.5 - om * 10
+        p_need = reqs["P2O5"] * yield_target * (1.5 if soil_p < 15 else 1.0)
+        k_need = reqs["K2O"] * yield_target * (1.5 if soil_k < 120 else 1.0)
+
+        # Lime requirement based on pH
+        if ph < 6.0:
+            lime = (6.5 - ph) * 2000
+        else:
+            lime = 0
+
+        return {
+            "nitrogen": max(0, n_need),
+            "phosphorus": max(0, p_need),
+            "potassium": max(0, k_need),
+            "lime": lime,
+            "N": max(0, n_need),
+            "P2O5": max(0, p_need),
+            "K2O": max(0, k_need),
+        }
+
+
 class NutrientManager:
     """
     Comprehensive nutrient management system.

@@ -146,6 +146,125 @@ GROWTH_PARAMETERS = {
 }
 
 
+class GompertzModel:
+    """
+    Gompertz growth curve model.
+
+    Classic sigmoidal growth model commonly used for livestock.
+
+    Example:
+        >>> model = GompertzModel(mature_weight=600, growth_rate=0.003)
+        >>> weight = model.predict(age_days=365)
+    """
+
+    def __init__(
+        self,
+        mature_weight: float = 500,
+        growth_rate: float = 0.003,
+        birth_weight: float = 35,
+    ):
+        """
+        Initialize Gompertz model.
+
+        Args:
+            mature_weight: Asymptotic mature weight (kg)
+            growth_rate: Growth rate parameter (k)
+            birth_weight: Weight at birth (kg)
+        """
+        self.mature_weight = mature_weight
+        self.growth_rate = growth_rate
+        self.birth_weight = birth_weight
+        self.b = np.log(mature_weight / birth_weight)
+
+    def predict(self, age_days: float) -> float:
+        """
+        Predict weight at given age.
+
+        W(t) = A * exp(-b * exp(-k * t))
+
+        Args:
+            age_days: Age in days
+
+        Returns:
+            Predicted weight (kg)
+        """
+        return self.mature_weight * np.exp(
+            -self.b * np.exp(-self.growth_rate * age_days)
+        )
+
+    def predict_trajectory(
+        self,
+        ages: np.ndarray,
+    ) -> np.ndarray:
+        """Predict weights over multiple ages."""
+        return np.array([self.predict(age) for age in ages])
+
+    def daily_gain(self, age_days: float) -> float:
+        """Calculate daily weight gain at given age."""
+        w = self.predict(age_days)
+        return w * self.growth_rate * self.b * np.exp(-self.growth_rate * age_days)
+
+
+class VonBertalanffyModel:
+    """
+    Von Bertalanffy growth curve model.
+
+    Growth model based on metabolic energy balance.
+
+    Example:
+        >>> model = VonBertalanffyModel(mature_weight=600, growth_rate=0.003)
+        >>> weight = model.predict(age_days=365)
+    """
+
+    def __init__(
+        self,
+        mature_weight: float = 500,
+        growth_rate: float = 0.003,
+        birth_weight: float = 35,
+    ):
+        """
+        Initialize von Bertalanffy model.
+
+        Args:
+            mature_weight: Asymptotic mature weight (kg)
+            growth_rate: Growth rate parameter (k)
+            birth_weight: Weight at birth (kg)
+        """
+        self.mature_weight = mature_weight
+        self.growth_rate = growth_rate
+        self.birth_weight = birth_weight
+        self.b = 1 - (birth_weight / mature_weight) ** (1/3)
+
+    def predict(self, age_days: float) -> float:
+        """
+        Predict weight at given age.
+
+        W(t) = A * (1 - b * exp(-k * t))^3
+
+        Args:
+            age_days: Age in days
+
+        Returns:
+            Predicted weight (kg)
+        """
+        return self.mature_weight * (
+            1 - self.b * np.exp(-self.growth_rate * age_days)
+        ) ** 3
+
+    def predict_trajectory(
+        self,
+        ages: np.ndarray,
+    ) -> np.ndarray:
+        """Predict weights over multiple ages."""
+        return np.array([self.predict(age) for age in ages])
+
+    def daily_gain(self, age_days: float) -> float:
+        """Calculate daily weight gain at given age."""
+        inner = 1 - self.b * np.exp(-self.growth_rate * age_days)
+        return 3 * self.mature_weight * self.growth_rate * self.b * \
+               np.exp(-self.growth_rate * age_days) * inner ** 2
+
+
 class GrowthCurve:
     """
     Mathematical growth curve models.

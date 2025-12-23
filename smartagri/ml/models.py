@@ -325,11 +325,24 @@ class RandomForestModel(BaseModel):
         return importance / np.sum(importance) if np.sum(importance) > 0 else importance
 
     def _score(self, X: np.ndarray, y: np.ndarray) -> float:
-        """Calculate R² score."""
+        """Calculate R² score (internal)."""
         predictions = self.predict(X)
         ss_res = np.sum((y - predictions) ** 2)
         ss_tot = np.sum((y - np.mean(y)) ** 2)
         return 1 - ss_res / ss_tot if ss_tot > 0 else 0
+
+    def score(self, X: np.ndarray, y: np.ndarray) -> float:
+        """
+        Calculate R² score for the model.
+
+        Args:
+            X: Features
+            y: Target values
+
+        Returns:
+            R² score
+        """
+        return self._score(X, y)
 
 
 class GradientBoostingModel(BaseModel):

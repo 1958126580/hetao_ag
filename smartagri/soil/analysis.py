@@ -164,15 +164,47 @@ class WaterRetention:
     matric potential for irrigation and drainage calculations.
 
     Example:
-        >>> retention = WaterRetention()
-        >>> params = retention.estimate_parameters(sand=40, silt=35, clay=25)
-        >>> theta = retention.water_content(psi=-100, **params)
+        >>> retention = WaterRetention(theta_r=0.05, theta_s=0.45, alpha=0.02, n=1.5)
+        >>> theta = retention.theta(psi=-100)
     """
 
-    def __init__(self):
-        """Initialize water retention model."""
-        # Van Genuchten parameters by texture (Carsel & Parrish, 1988)
-        self._vg_params = {
+    def __init__(
+        self,
+        theta_r: float = 0.05,
+        theta_s: float = 0.45,
+        alpha: float = 0.02,
+        n: float = 1.5,
+    ):
+        """
+        Initialize water retention model.
+
+        Args:
+            theta_r: Residual water content
+            theta_s: Saturated water content
+            alpha: van Genuchten alpha parameter (1/cm)
+            n: van Genuchten n parameter
+        """
+        self._theta_r = theta_r
+        self._theta_s = theta_s
+        self._alpha = alpha
+        self._n = n
+
+    def theta(self, psi: float) -> float:
+        """
+        Calculate water content at given matric potential using instance parameters.
+
+        Args:
+            psi: Matric potential (cm, negative for unsaturated)
+
+        Returns:
+            Volumetric water content (m3/m3)
+        """
+        return self.water_content(
+            psi, self._theta_r, self._theta_s, self._alpha, self._n
+        )
+
+    # Van Genuchten parameters by texture (Carsel & Parrish, 1988) - class variable
+    _vg_params = {
             "sand": {"theta_r": 0.045, "theta_s": 0.43, "alpha": 0.145, "n": 2.68},
             "loamy_sand": {"theta_r": 0.057, "theta_s": 0.41, "alpha": 0.124, "n": 2.28},
             "sandy_loam": {"theta_r": 0.065, "theta_s": 0.41, "alpha": 0.075, "n": 1.89},
@@ -342,6 +374,76 @@ class WaterRetention:
         ])
 
         return psi, theta
+
+
+class HydraulicConductivity:
+    """
+    Hydraulic conductivity model.
+
+    Calculates saturated and unsaturated hydraulic conductivity
+    based on soil properties and saturation levels.
+
+    Example:
+        >>> hc = HydraulicConductivity(k_sat=100.0)
+        >>> k = hc.calculate(saturation=0.5)
+    """
+
+    def __init__(
+        self,
+        k_sat: float = 100.0,
+        lambda_param: float = 0.5,
+    ):
+        """
+        Initialize hydraulic conductivity model.
+
+        Args:
+            k_sat: Saturated hydraulic conductivity (cm/day)
+            lambda_param: Pore size distribution parameter
+        """
+        self.k_sat = k_sat
+        self.lambda_param = lambda_param
+
+    def calculate(
+        self,
+        saturation: float,
+        method: str = "brooks_corey",
+    ) -> float:
+        """
+        Calculate hydraulic conductivity at given saturation.
+
+        Args:
+            saturation: Effective saturation (0-1)
+            method: Calculation method ('brooks_corey', 'van_genuchten')
+
+        Returns:
+            Hydraulic conductivity (cm/day)
+        """
+        saturation = max(0.001, min(1.0, saturation))
+
+        if method == "brooks_corey":
+            # Brooks-Corey model
+            k = self.k_sat * saturation ** (3 + 2 / self.lambda_param)
+        elif method == "van_genuchten":
+            # Van Genuchten-Mualem model
+            m = self.lambda_param / (1 + self.lambda_param)
+            k = self.k_sat * saturation ** 0.5 * (1 - (1 - saturation ** (1/m)) ** m) ** 2
+        else:
+            # Simple power law
+            k = self.k_sat * saturation ** 3
+
+        return max(k, 0.0)
+
+    def relative_conductivity(self, saturation: float) -> float:
+        """
+        Calculate relative hydraulic conductivity (K/Ksat).
+
+        Args:
+            saturation: Effective saturation (0-1)
+
+        Returns:
+            Relative conductivity (0-1)
+        """
+        return self.calculate(saturation) / self.k_sat if self.k_sat > 0 else 0.0
 
 
 class SoilAnalyzer:

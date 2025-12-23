@@ -20,6 +20,132 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class StandardScaler:
+    """
+    Standardization scaler (zero mean, unit variance).
+
+    Example:
+        >>> scaler = StandardScaler()
+        >>> X_scaled = scaler.fit_transform(X)
+    """
+
+    def __init__(self):
+        """Initialize scaler."""
+        self.mean_ = None
+        self.std_ = None
+        self._fitted = False
+
+    def fit(self, X: np.ndarray) -> 'StandardScaler':
+        """
+        Fit scaler to data.
+
+        Args:
+            X: Training data
+
+        Returns:
+            Fitted scaler
+        """
+        self.mean_ = np.mean(X, axis=0)
+        self.std_ = np.std(X, axis=0) + 1e-8
+        self._fitted = True
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        """
+        Transform data.
+
+        Args:
+            X: Data to transform
+
+        Returns:
+            Standardized data
+        """
+        if not self._fitted:
+            raise ValueError("Scaler not fitted")
+        return (X - self.mean_) / self.std_
+
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
+        """Fit and transform in one step."""
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+        """Inverse transform to original scale."""
+        if not self._fitted:
+            raise ValueError("Scaler not fitted")
+        return X * self.std_ + self.mean_
+
+
+class MinMaxScaler:
+    """
+    Min-Max scaling to [0, 1] range.
+
+    Example:
+        >>> scaler = MinMaxScaler()
+        >>> X_scaled = scaler.fit_transform(X)
+    """
+
+    def __init__(self, feature_range: Tuple[float, float] = (0, 1)):
+        """
+        Initialize scaler.
+
+        Args:
+            feature_range: Target range (min, max)
+        """
+        self.feature_range = feature_range
+        self.min_ = None
+        self.max_ = None
+        self.scale_ = None
+        self._fitted = False
+
+    def fit(self, X: np.ndarray) -> 'MinMaxScaler':
+        """
+        Fit scaler to data.
+
+        Args:
+            X: Training data
+
+        Returns:
+            Fitted scaler
+        """
+        self.min_ = np.min(X, axis=0)
+        self.max_ = np.max(X, axis=0)
+        self.scale_ = self.max_ - self.min_ + 1e-8
+        self._fitted = True
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        """
+        Transform data.
+
+        Args:
+            X: Data to transform
+
+        Returns:
+            Scaled data
+        """
+        if not self._fitted:
+            raise ValueError("Scaler not fitted")
+
+        X_std = (X - self.min_) / self.scale_
+        min_range, max_range = self.feature_range
+        return X_std * (max_range - min_range) + min_range
+
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
+        """Fit and transform in one step."""
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+        """Inverse transform to original scale."""
+        if not self._fitted:
+            raise ValueError("Scaler not fitted")
+
+        min_range, max_range = self.feature_range
+        X_std = (X - min_range) / (max_range - min_range)
+        return X_std * self.scale_ + self.min_
+
+
 class DataPreprocessor:
     """
     Comprehensive data preprocessing.

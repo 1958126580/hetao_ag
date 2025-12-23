@@ -98,6 +98,174 @@ class WaterBudget:
     final_storage: float = 0.0
 
 
+class SoilWaterBalance:
+    """
+    Simple soil water balance model.
+
+    Tracks soil water storage and calculates deficits
+    for irrigation scheduling.
+
+    Example:
+        >>> swb = SoilWaterBalance(field_capacity=0.30, wilting_point=0.12, root_depth=0.6)
+        >>> swb.update(et=5.0, rainfall=10.0)
+        >>> deficit = swb.get_deficit()
+    """
+
+    def __init__(
+        self,
+        soil_type: str = None,
+        root_depth: float = 0.6,
+        initial_deficit: float = 0.0,
+        field_capacity: float = None,
+        wilting_point: float = None,
+        mad: float = 0.5,
+    ):
+        """
+        Initialize water balance.
+
+        Args:
+            soil_type: Soil texture class (optional if field_capacity/wilting_point provided)
+            root_depth: Root zone depth (m)
+            initial_deficit: Initial soil water deficit (mm)
+            field_capacity: Field capacity as volumetric fraction (0-1)
+            wilting_point: Wilting point as volumetric fraction (0-1)
+            mad: Management allowed depletion fraction
+        """
+        self.root_depth = root_depth
+        self.mad = mad
+
+        # Use provided values or get from soil type
+        if field_capacity is not None and wilting_point is not None:
+            # Values provided as volumetric fractions
+            self.fc = field_capacity * root_depth * 1000  # Convert to mm
+            self.wp = wilting_point * root_depth * 1000  # Convert to mm
+            self.soil_type = "custom"
+        else:
+            self.soil_type = (soil_type or "loam").lower().replace(" ", "_")
+            self.params = SOIL_WATER_PARAMS.get(
+                self.soil_type, SOIL_WATER_PARAMS["loam"]
+            )
+            self.fc = self.params.field_capacity * root_depth  # mm
+            self.wp = self.params.wilting_point * root_depth  # mm
+
+        self.taw = self.fc - self.wp  # Total available water
+
+        # Initialize soil water
+        self._deficit = initial_deficit  # mm below field capacity
+        self._history: List[Dict[str, Any]] = []
+
+    def update(
+        self,
+        et: float = 0.0,
+        rainfall: float = 0.0,
+        irrigation: float = 0.0,
+    ) -> float:
+        """
+        Update water balance.
+
+        Args:
+            et: Evapotranspiration (mm)
+            rainfall: Rainfall (mm)
+            irrigation: Irrigation applied (mm)
+
+        Returns:
+            Updated deficit (mm)
+        """
+        # Calculate inputs and outputs
+        inflow = rainfall + irrigation
+        outflow = et
+
+        # Update deficit
+        self._deficit = self._deficit + outflow - inflow
+
+        # Constrain deficit between 0 and TAW
+        if self._deficit < 0:
+            drainage = -self._deficit
+            self._deficit = 0
+        else:
+            drainage = 0
+
+        self._deficit = min(self._deficit, self.taw)
+
+        # Record history
+        self._history.append({
+            "et": et,
+            "rainfall": rainfall,
+            "irrigation": irrigation,
+            "drainage": drainage,
+            "deficit": self._deficit,
+        })
+
+        return self._deficit
+
+    def reset(self) -> None:
+        """Reset water balance to field capacity."""
+        self._deficit = 0.0
+        self._history = []
+
+    def daily_update(
+        self,
+        et: float = 0.0,
+        precipitation: float = 0.0,
+        irrigation: float = 0.0,
+    ) -> Dict[str, float]:
+        """
+        Update water balance for one day.
+
+        Alias for update() with dict return.
+
+        Args:
+            et: Evapotranspiration (mm)
+            precipitation: Rainfall (mm)
+            irrigation: Irrigation applied (mm)
+
+        Returns:
+            Dict with balance details
+        """
+        old_deficit = self._deficit
+        new_deficit = self.update(et, precipitation, irrigation)
+
+        return {
+            "previous_deficit": old_deficit,
+            "et": et,
+            "precipitation": precipitation,
+            "irrigation": irrigation,
+            "current_deficit": new_deficit,
+            "storage": self.get_storage(),
+        }
+
+    def get_deficit(self) -> float:
+        """Get current soil water deficit (mm)."""
+        return self._deficit
+
+    def get_depletion_fraction(self) -> float:
+        """Get fraction of available water depleted (0-1)."""
+        return self._deficit / self.taw if self.taw > 0 else 0.0
+
+    def get_storage(self) -> float:
+        """Get current soil water storage (mm)."""
+        return self.fc - self._deficit
+
+    def irrigation_needed(
+        self,
+        mad: float = 0.5,
+    ) -> Tuple[bool, float]:
+        """
+        Check if irrigation is needed.
+
+        Args:
+            mad: Management allowed depletion (fraction)
+
+        Returns:
+            Tuple of (needed, amount_mm)
+        """
+        threshold = self.taw * mad
+        if self._deficit > threshold:
+            amount = self._deficit  # Refill to field capacity
+            return True, amount
+        return False, 0.0
+
+
 class SoilMoistureTracker:
     """
     Soil moisture monitoring and tracking.

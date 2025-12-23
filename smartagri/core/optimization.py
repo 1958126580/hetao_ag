@@ -187,6 +187,65 @@ class GradientDescent(BaseOptimizer):
         self._step_count = 0
         self.learning_rate = self.initial_lr
 
+    def minimize(
+        self,
+        objective: Callable[[np.ndarray], float],
+        x0: np.ndarray,
+        gradient: Callable[[np.ndarray], np.ndarray],
+        max_iterations: int = 1000,
+        tol: float = 1e-6,
+    ) -> Dict[str, Any]:
+        """
+        Minimize objective function using gradient descent.
+
+        Args:
+            objective: Objective function f(x) -> scalar
+            x0: Initial parameter values
+            gradient: Gradient function grad_f(x) -> array
+            max_iterations: Maximum number of iterations
+            tol: Convergence tolerance
+
+        Returns:
+            Dictionary with optimization results:
+                - x: Optimal parameters
+                - fun: Final objective value
+                - nit: Number of iterations
+                - success: Whether converged
+
+        Example:
+            >>> def f(x): return x[0]**2 + x[1]**2
+            >>> def grad(x): return np.array([2*x[0], 2*x[1]])
+            >>> gd = GradientDescent(learning_rate=0.1)
+            >>> result = gd.minimize(f, np.array([5.0, 5.0]), grad)
+        """
+        self.reset()
+        x = x0.copy().astype(float)
+        prev_loss = objective(x)
+
+        for i in range(max_iterations):
+            grad = gradient(x)
+            x = self.step(x, grad)
+            loss = objective(x)
+
+            if abs(loss - prev_loss) < tol:
+                return {
+                    'x': x,
+                    'fun': loss,
+                    'nit': i + 1,
+                    'success': True,
+                    'message': 'Converged'
+                }
+
+            prev_loss = loss
+
+        return {
+            'x': x,
+            'fun': objective(x),
+            'nit': max_iterations,
+            'success': False,
+            'message': 'Maximum iterations reached'
+        }
+
 
 class AdamOptimizer(BaseOptimizer):
     """
@@ -297,6 +356,61 @@ class AdamOptimizer(BaseOptimizer):
         self._v = None
         self._v_max = None
         self._step_count = 0
+
+    def minimize(
+        self,
+        objective: Callable[[np.ndarray], float],
+        x0: np.ndarray,
+        gradient: Callable[[np.ndarray], np.ndarray],
+        max_iterations: int = 1000,
+        tol: float = 1e-6,
+    ) -> Dict[str, Any]:
+        """
+        Minimize objective function using Adam optimizer.
+
+        Args:
+            objective: Objective function f(x) -> scalar
+            x0: Initial parameter values
+            gradient: Gradient function grad_f(x) -> array
+            max_iterations: Maximum number of iterations
+            tol: Convergence tolerance
+
+        Returns:
+            Dictionary with optimization results
+
+        Example:
+            >>> def f(x): return (x[0]-2)**2 + (x[1]-3)**2
+            >>> def grad(x): return np.array([2*(x[0]-2), 2*(x[1]-3)])
+            >>> adam = AdamOptimizer(learning_rate=0.5)
+            >>> result = adam.minimize(f, np.array([0., 0.]), grad)
+        """
+        self.reset()
+        x = x0.copy().astype(float)
+        prev_loss = objective(x)
+
+        for i in range(max_iterations):
+            grad = gradient(x)
+            x = self.step(x, grad)
+            loss = objective(x)
+
+            if abs(loss - prev_loss) < tol and np.linalg.norm(grad) < tol:
+                return {
+                    'x': x,
+                    'fun': loss,
+                    'nit': i + 1,
+                    'success': True,
+                    'message': 'Converged'
+                }
+
+            prev_loss = loss
+
+        return {
+            'x': x,
+            'fun': objective(x),
+            'nit': max_iterations,
+            'success': False,
+            'message': 'Maximum iterations reached'
+        }
 
 
 class LBFGSOptimizer:
@@ -420,8 +534,10 @@ class GeneticAlgorithm:
         self,
         population_size: int = 50,
         n_generations: int = 100,
-        crossover_prob: float = 0.8,
-        mutation_prob: float = 0.1,
+        crossover_prob: float = None,
+        mutation_prob: float = None,
+        crossover_rate: float = 0.8,
+        mutation_rate: float = 0.1,
         elite_size: int = 2,
         tournament_size: int = 3,
         seed: Optional[int] = None,
@@ -432,7 +548,8 @@ class GeneticAlgorithm:
         Args:
             population_size: Size of population
             n_generations: Number of generations
-            crossover_prob: Crossover probability
+            crossover_prob/crossover_rate: Crossover probability
+            mutation_prob/mutation_rate: Mutation probability
             mutation_prob: Mutation probability per gene
             elite_size: Number of elite individuals to preserve
             tournament_size: Tournament selection size
@@ -440,8 +557,9 @@ class GeneticAlgorithm:
         """
         self.population_size = population_size
         self.n_generations = n_generations
-        self.crossover_prob = crossover_prob
-        self.mutation_prob = mutation_prob
+        # Support both naming conventions
+        self.crossover_prob = crossover_prob if crossover_prob is not None else crossover_rate
+        self.mutation_prob = mutation_prob if mutation_prob is not None else mutation_rate
         self.elite_size = elite_size
         self.tournament_size = tournament_size
 
@@ -452,7 +570,8 @@ class GeneticAlgorithm:
         objective: ObjectiveFunc,
         bounds: List[Tuple[float, float]],
         constraints: Optional[List[Callable]] = None,
-    ) -> OptimizationResult:
+        max_generations: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Minimize objective using genetic algorithm.
 
@@ -460,10 +579,16 @@ class GeneticAlgorithm:
             objective: Objective function to minimize
             bounds: Parameter bounds [(low, high), ...]
             constraints: Optional constraint functions (must return >= 0)
+            max_generations: Override default number of generations
 
         Returns:
-            OptimizationResult with optimal solution
+            Dictionary with optimization results including 'x', 'fun', etc.
         """
+        if max_generations is not None:
+            n_gens = max_generations
+        else:
+            n_gens = self.n_generations
+
         n_vars = len(bounds)
         bounds = np.array(bounds)
         lower = bounds[:, 0]
@@ -484,7 +609,7 @@ class GeneticAlgorithm:
         best_individual = population[best_idx].copy()
         best_fitness = fitness[best_idx]
 
-        for generation in range(self.n_generations):
+        for generation in range(n_gens):
             # Selection
             selected = self._tournament_selection(population, fitness)
 
@@ -532,15 +657,15 @@ class GeneticAlgorithm:
                 f"mean={np.mean(fitness):.6f}"
             )
 
-        return OptimizationResult(
-            x=best_individual,
-            fun=best_fitness,
-            success=True,
-            message=f"Optimization completed after {self.n_generations} generations",
-            n_iterations=self.n_generations,
-            n_function_evals=n_evals,
-            history=history,
-        )
+        return {
+            'x': best_individual,
+            'fun': best_fitness,
+            'success': True,
+            'message': f"Optimization completed after {n_gens} generations",
+            'nit': n_gens,
+            'nfev': n_evals,
+            'history': history,
+        }
 
     def _initialize_population(
         self,

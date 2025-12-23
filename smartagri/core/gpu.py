@@ -480,6 +480,7 @@ class GPUAccelerator:
         device_id: int = 0,
         use_tensor_cores: bool = True,
         mixed_precision: bool = False,
+        prefer_gpu: bool = True,
     ):
         """
         Initialize the GPU accelerator.
@@ -488,10 +489,12 @@ class GPUAccelerator:
             device_id: GPU device to use
             use_tensor_cores: Enable Tensor Core acceleration (Volta+)
             mixed_precision: Enable FP16/FP32 mixed precision
+            prefer_gpu: If True, prefer GPU over CPU when available
         """
         self.device_id = device_id
         self.use_tensor_cores = use_tensor_cores
         self.mixed_precision = mixed_precision
+        self.prefer_gpu = prefer_gpu
 
         self._device_info: Optional[GPUDeviceInfo] = None
         self._context: Optional[GPUContext] = None
@@ -592,6 +595,88 @@ class GPUAccelerator:
             logger.debug("Using Tensor Core acceleration for matmul")
 
         return np.matmul(a, b)
+
+    def exp(self, x: np.ndarray) -> np.ndarray:
+        """
+        Element-wise exponential.
+
+        Args:
+            x: Input array
+
+        Returns:
+            exp(x) computed element-wise
+
+        Example:
+            >>> accel = GPUAccelerator()
+            >>> result = accel.exp(np.array([0, 1, 2]))
+        """
+        return np.exp(x)
+
+    def log(self, x: np.ndarray) -> np.ndarray:
+        """
+        Element-wise natural logarithm.
+
+        Args:
+            x: Input array (must be positive)
+
+        Returns:
+            log(x) computed element-wise
+
+        Example:
+            >>> accel = GPUAccelerator()
+            >>> result = accel.log(np.array([1, 2.718, 10]))
+        """
+        return np.log(x)
+
+    def sum(self, x: np.ndarray, axis: Optional[int] = None) -> Union[float, np.ndarray]:
+        """
+        Sum of array elements.
+
+        Args:
+            x: Input array
+            axis: Axis along which to sum (None for total sum)
+
+        Returns:
+            Sum of elements
+
+        Example:
+            >>> accel = GPUAccelerator()
+            >>> result = accel.sum(np.array([[1, 2], [3, 4]]))  # Returns 10
+        """
+        return np.sum(x, axis=axis)
+
+    def mean(self, x: np.ndarray, axis: Optional[int] = None) -> Union[float, np.ndarray]:
+        """
+        Mean of array elements.
+
+        Args:
+            x: Input array
+            axis: Axis along which to compute mean (None for total mean)
+
+        Returns:
+            Mean of elements
+
+        Example:
+            >>> accel = GPUAccelerator()
+            >>> result = accel.mean(np.array([[1, 2], [3, 4]]))  # Returns 2.5
+        """
+        return np.mean(x, axis=axis)
+
+    def sqrt(self, x: np.ndarray) -> np.ndarray:
+        """Element-wise square root."""
+        return np.sqrt(x)
+
+    def sin(self, x: np.ndarray) -> np.ndarray:
+        """Element-wise sine."""
+        return np.sin(x)
+
+    def cos(self, x: np.ndarray) -> np.ndarray:
+        """Element-wise cosine."""
+        return np.cos(x)
+
+    def power(self, x: np.ndarray, p: float) -> np.ndarray:
+        """Element-wise power."""
+        return np.power(x, p)
 
     def conv2d(
         self,

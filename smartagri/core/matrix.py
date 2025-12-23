@@ -134,6 +134,161 @@ class MatrixOps:
         arr = np.asarray(x, dtype=self.precision)
         return np.ascontiguousarray(arr)
 
+    # Static methods for direct access without instantiation
+    @staticmethod
+    def svd(A: ArrayLike, full_matrices: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Singular Value Decomposition: A = U @ diag(S) @ Vt
+
+        Args:
+            A: Input matrix (m x n)
+            full_matrices: If True, return full U and Vt
+
+        Returns:
+            Tuple of (U, S, Vt) where A = U @ diag(S) @ Vt
+
+        Example:
+            >>> U, S, Vt = MatrixOps.svd(A)
+            >>> reconstructed = U @ np.diag(S) @ Vt
+        """
+        A = np.asarray(A, dtype=np.float64)
+        return linalg.svd(A, full_matrices=full_matrices)
+
+    @staticmethod
+    def qr(A: ArrayLike, mode: str = 'reduced') -> Tuple[np.ndarray, np.ndarray]:
+        """
+        QR Decomposition: A = Q @ R
+
+        Args:
+            A: Input matrix (m x n)
+            mode: 'reduced' for thin QR, 'complete' for full
+
+        Returns:
+            Tuple of (Q, R) where A = Q @ R
+
+        Example:
+            >>> Q, R = MatrixOps.qr(A)
+            >>> np.allclose(A, Q @ R)  # True
+        """
+        A = np.asarray(A, dtype=np.float64)
+        return linalg.qr(A, mode='economic' if mode == 'reduced' else 'full')
+
+    @staticmethod
+    def cholesky(A: ArrayLike, lower: bool = True) -> np.ndarray:
+        """
+        Cholesky Decomposition: A = L @ L.T (for lower=True)
+
+        Args:
+            A: Positive definite matrix
+            lower: If True, return lower triangular factor
+
+        Returns:
+            Cholesky factor L
+
+        Example:
+            >>> L = MatrixOps.cholesky(A)
+            >>> np.allclose(A, L @ L.T)  # True
+        """
+        A = np.asarray(A, dtype=np.float64)
+        return linalg.cholesky(A, lower=lower)
+
+    @staticmethod
+    def solve(A: ArrayLike, b: ArrayLike) -> np.ndarray:
+        """
+        Solve linear system Ax = b
+
+        Args:
+            A: Coefficient matrix (n x n)
+            b: Right-hand side vector (n,) or matrix (n x m)
+
+        Returns:
+            Solution vector/matrix x
+
+        Example:
+            >>> x = MatrixOps.solve(A, b)
+            >>> np.allclose(A @ x, b)  # True
+        """
+        A = np.asarray(A, dtype=np.float64)
+        b = np.asarray(b, dtype=np.float64)
+        return linalg.solve(A, b)
+
+    @staticmethod
+    def inverse(A: ArrayLike) -> np.ndarray:
+        """
+        Matrix inverse: A^(-1)
+
+        Args:
+            A: Square invertible matrix
+
+        Returns:
+            Inverse matrix A^(-1)
+
+        Example:
+            >>> A_inv = MatrixOps.inverse(A)
+            >>> np.allclose(A @ A_inv, np.eye(len(A)))  # True
+        """
+        A = np.asarray(A, dtype=np.float64)
+        return linalg.inv(A)
+
+    @staticmethod
+    def eigendecomposition(A: ArrayLike) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Eigenvalue decomposition: A @ V = V @ diag(eigenvalues)
+
+        Args:
+            A: Square matrix
+
+        Returns:
+            Tuple of (eigenvalues, eigenvectors)
+
+        Example:
+            >>> eigenvalues, eigenvectors = MatrixOps.eigendecomposition(A)
+        """
+        A = np.asarray(A, dtype=np.float64)
+        eigenvalues, eigenvectors = linalg.eig(A)
+        # Return real parts if matrix is real symmetric
+        if np.allclose(A, A.T):
+            eigenvalues = np.real(eigenvalues)
+            eigenvectors = np.real(eigenvectors)
+        return eigenvalues, eigenvectors
+
+    @staticmethod
+    def lstsq(A: ArrayLike, b: ArrayLike) -> np.ndarray:
+        """
+        Least squares solution to Ax = b
+
+        Args:
+            A: Coefficient matrix (m x n)
+            b: Right-hand side (m,) or (m x k)
+
+        Returns:
+            Least squares solution x
+
+        Example:
+            >>> x = MatrixOps.lstsq(A, b)
+        """
+        A = np.asarray(A, dtype=np.float64)
+        b = np.asarray(b, dtype=np.float64)
+        result = linalg.lstsq(A, b)
+        return result[0]
+
+    @staticmethod
+    def det(A: ArrayLike) -> float:
+        """Calculate matrix determinant."""
+        return linalg.det(np.asarray(A, dtype=np.float64))
+
+    @staticmethod
+    def norm(A: ArrayLike, ord: Optional[Union[int, float, str]] = None) -> float:
+        """Calculate matrix/vector norm."""
+        return linalg.norm(np.asarray(A, dtype=np.float64), ord=ord)
+
+    @staticmethod
+    def cond(A: ArrayLike) -> float:
+        """Calculate condition number."""
+        A = np.asarray(A, dtype=np.float64)
+        s = linalg.svdvals(A)
+        return s[0] / s[-1] if s[-1] > 0 else np.inf
+
     def matmul(
         self,
         a: ArrayLike,
@@ -246,9 +401,9 @@ class MatrixOps:
         x = self._ensure_array(x)
         return np.transpose(x, axes=axes)
 
-    def inverse(self, x: ArrayLike) -> np.ndarray:
+    def inv(self, x: ArrayLike) -> np.ndarray:
         """
-        Compute matrix inverse.
+        Compute matrix inverse (instance method).
 
         Args:
             x: Square matrix
@@ -287,14 +442,14 @@ class MatrixOps:
         x = self._ensure_array(x)
         return linalg.pinv(x, rcond=rcond)
 
-    def solve(
+    def solve_system(
         self,
         a: ArrayLike,
         b: ArrayLike,
         assume_a: str = "gen",
     ) -> np.ndarray:
         """
-        Solve linear system Ax = b.
+        Solve linear system Ax = b (instance method).
 
         Args:
             a: Coefficient matrix (N x N)
@@ -310,21 +465,21 @@ class MatrixOps:
             >>> y = np.random.randn(100)
             >>> XtX = ops.matmul(X.T, X)
             >>> Xty = ops.matmul(X.T, y)
-            >>> beta = ops.solve(XtX, Xty)
+            >>> beta = ops.solve_system(XtX, Xty)
         """
         a = self._ensure_array(a)
         b = self._ensure_array(b)
 
         return linalg.solve(a, b, assume_a=assume_a)
 
-    def lstsq(
+    def least_squares(
         self,
         a: ArrayLike,
         b: ArrayLike,
         rcond: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray, int, np.ndarray]:
         """
-        Least squares solution to overdetermined system.
+        Least squares solution to overdetermined system (instance method).
 
         Solves min ||Ax - b||_2 using SVD decomposition.
         Commonly used for linear regression in yield modeling.
@@ -340,7 +495,7 @@ class MatrixOps:
         Example:
             >>> # Fit yield model: yield = b0 + b1*temp + b2*rain + b3*soil
             >>> X = np.column_stack([np.ones(n), temp, rain, soil])
-            >>> beta, residuals, rank, s = ops.lstsq(X, yields)
+            >>> beta, residuals, rank, s = ops.least_squares(X, yields)
         """
         a = self._ensure_array(a)
         b = self._ensure_array(b)
@@ -348,13 +503,13 @@ class MatrixOps:
         result = linalg.lstsq(a, b, cond=rcond)
         return result
 
-    def qr(
+    def qr_decompose(
         self,
         x: ArrayLike,
         mode: str = "reduced",
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        QR decomposition.
+        QR decomposition (instance method).
 
         Factorizes A = QR where Q is orthogonal and R is upper triangular.
 
@@ -368,13 +523,13 @@ class MatrixOps:
         x = self._ensure_array(x)
         return linalg.qr(x, mode=mode)
 
-    def cholesky(
+    def cholesky_decompose(
         self,
         x: ArrayLike,
         lower: bool = True,
     ) -> np.ndarray:
         """
-        Cholesky decomposition for positive definite matrices.
+        Cholesky decomposition for positive definite matrices (instance method).
 
         Factorizes A = LL^T (or A = U^TU). Useful for solving
         systems involving covariance matrices.
@@ -388,7 +543,7 @@ class MatrixOps:
 
         Example:
             >>> # Solve system with covariance matrix
-            >>> L = ops.cholesky(covariance_matrix)
+            >>> L = ops.cholesky_decompose(covariance_matrix)
             >>> x = ops.solve_triangular(L, b, lower=True)
         """
         x = self._ensure_array(x)
@@ -452,14 +607,14 @@ class MatrixOps:
             )
         return linalg.eigh(x)
 
-    def svd(
+    def svd_decompose(
         self,
         x: ArrayLike,
         full_matrices: bool = False,
         compute_uv: bool = True,
     ) -> Union[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]:
         """
-        Singular Value Decomposition.
+        Singular Value Decomposition (instance method).
 
         Factorizes A = U @ diag(S) @ V^T. Fundamental for PCA,
         dimensionality reduction, and matrix approximation.
@@ -475,7 +630,7 @@ class MatrixOps:
 
         Example:
             >>> # Low-rank approximation of satellite image
-            >>> U, S, Vt = ops.svd(image)
+            >>> U, S, Vt = ops.svd_decompose(image)
             >>> k = 50  # Keep top 50 components
             >>> compressed = U[:, :k] @ np.diag(S[:k]) @ Vt[:k, :]
         """
@@ -485,14 +640,14 @@ class MatrixOps:
             return linalg.svd(x, full_matrices=full_matrices)
         return linalg.svdvals(x)
 
-    def norm(
+    def compute_norm(
         self,
         x: ArrayLike,
         ord: Optional[Union[int, float, str]] = None,
         axis: Optional[int] = None,
     ) -> Union[float, np.ndarray]:
         """
-        Matrix or vector norm.
+        Matrix or vector norm (instance method).
 
         Args:
             x: Input array
@@ -505,9 +660,9 @@ class MatrixOps:
         x = self._ensure_array(x)
         return linalg.norm(x, ord=ord, axis=axis)
 
-    def cond(self, x: ArrayLike, p: int = 2) -> float:
+    def condition_number(self, x: ArrayLike, p: int = 2) -> float:
         """
-        Condition number of a matrix.
+        Condition number of a matrix (instance method).
 
         Measures sensitivity to numerical errors. High condition
         number indicates ill-conditioned matrix.
@@ -540,9 +695,9 @@ class MatrixOps:
         x = self._ensure_array(x)
         return np.linalg.matrix_rank(x, tol=tol)
 
-    def det(self, x: ArrayLike) -> float:
+    def determinant(self, x: ArrayLike) -> float:
         """
-        Matrix determinant.
+        Matrix determinant (instance method).
 
         Args:
             x: Square matrix
@@ -1192,7 +1347,7 @@ def svd_decomposition(
         >>> reduced_data = U[:, :10] @ np.diag(S[:10])
     """
     ops = MatrixOps()
-    U, S, Vt = ops.svd(x)
+    U, S, Vt = ops.svd_decompose(x)
 
     if n_components is not None:
         U = U[:, :n_components]
@@ -1213,7 +1368,7 @@ def qr_decomposition(x: ArrayLike) -> Tuple[np.ndarray, np.ndarray]:
         Tuple of (Q, R)
     """
     ops = MatrixOps()
-    return ops.qr(x)
+    return ops.qr_decompose(x)
 
 
 def cholesky_decomposition(
@@ -1236,4 +1391,4 @@ def cholesky_decomposition(
         >>> samples = mean + L @ np.random.randn(n_features, n_samples)
     """
     ops = MatrixOps()
-    return ops.cholesky(x, lower=lower)
+    return ops.cholesky_decompose(x, lower=lower)

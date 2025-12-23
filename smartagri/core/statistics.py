@@ -150,6 +150,66 @@ class DescriptiveStats:
         """
         self.ddof = ddof
 
+    @staticmethod
+    def calculate(data: ArrayLike, ddof: int = 1) -> Dict[str, float]:
+        """
+        Calculate comprehensive descriptive statistics.
+
+        Args:
+            data: Input data array
+            ddof: Degrees of freedom for std calculation
+
+        Returns:
+            Dictionary with statistics
+
+        Example:
+            >>> stats = DescriptiveStats.calculate([1, 2, 3, 4, 5])
+            >>> print(f"Mean: {stats['mean']}")
+        """
+        data = np.asarray(data).flatten()
+        data = data[~np.isnan(data)]
+
+        return {
+            'n': len(data),
+            'mean': float(np.mean(data)),
+            'median': float(np.median(data)),
+            'std': float(np.std(data, ddof=ddof)),
+            'var': float(np.var(data, ddof=ddof)),
+            'min': float(np.min(data)),
+            'max': float(np.max(data)),
+            'sum': float(np.sum(data)),
+            'range': float(np.max(data) - np.min(data)),
+        }
+
+    @staticmethod
+    def correlation(x: ArrayLike, y: ArrayLike) -> float:
+        """
+        Calculate Pearson correlation coefficient.
+
+        Args:
+            x: First variable
+            y: Second variable
+
+        Returns:
+            Correlation coefficient (-1 to 1)
+
+        Example:
+            >>> r = DescriptiveStats.correlation([1, 2, 3], [2, 4, 6])
+            >>> print(f"Correlation: {r}")  # 1.0
+        """
+        x = np.asarray(x).flatten()
+        y = np.asarray(y).flatten()
+
+        # Remove NaN
+        mask = ~(np.isnan(x) | np.isnan(y))
+        x = x[mask]
+        y = y[mask]
+
+        if len(x) < 2:
+            return 0.0
+
+        return float(np.corrcoef(x, y)[0, 1])
+
     def describe(
         self,
         data: ArrayLike,
@@ -583,15 +643,16 @@ class HypothesisTesting:
         """
         self.alpha = alpha
 
+    @staticmethod
     def t_test(
-        self,
         group1: ArrayLike,
         group2: Optional[ArrayLike] = None,
         mu: float = 0,
         alternative: str = "two-sided",
         paired: bool = False,
         equal_var: bool = True,
-    ) -> HypothesisTestResult:
+        alpha: float = 0.05,
+    ) -> Dict[str, Any]:
         """
         Perform t-test for means.
 
@@ -602,9 +663,14 @@ class HypothesisTesting:
             alternative: 'two-sided', 'less', or 'greater'
             paired: Paired samples test
             equal_var: Assume equal variances (two-sample)
+            alpha: Significance level
 
         Returns:
-            HypothesisTestResult with test results
+            Dictionary with test results
+
+        Example:
+            >>> result = HypothesisTesting.t_test([1,2,3], [2,3,4])
+            >>> print(f"p-value: {result['p_value']}")
         """
         group1 = np.asarray(group1).flatten()
 
@@ -635,13 +701,13 @@ class HypothesisTesting:
                 )
                 effect_size = (np.mean(group1) - np.mean(group2)) / pooled_std
 
-        return HypothesisTestResult(
-            statistic=statistic,
-            p_value=p_value,
-            reject_null=p_value < self.alpha,
-            alpha=self.alpha,
-            effect_size=effect_size,
-        )
+        return {
+            't_statistic': float(statistic),
+            'p_value': float(p_value),
+            'significant': bool(p_value < alpha),
+            'effect_size': float(effect_size),
+            'alpha': alpha,
+        }
 
     def anova(
         self,

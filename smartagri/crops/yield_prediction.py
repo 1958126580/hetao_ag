@@ -820,7 +820,7 @@ class YieldPredictor:
     automatic model selection and hyperparameter tuning.
 
     Example:
-        >>> predictor = YieldPredictor(crop="corn", use_gpu=True)
+        >>> predictor = YieldPredictor(crop_type="corn", use_gpu=True)
         >>> predictor.fit(X_train, y_train, feature_names=columns)
         >>> result = predictor.predict(X_test, return_confidence=True)
         >>> print(f"Predicted yield: {result.predictions.mean():.0f} kg/ha")
@@ -828,7 +828,8 @@ class YieldPredictor:
 
     def __init__(
         self,
-        crop: str = "corn",
+        crop: str = None,
+        crop_type: str = None,
         model_type: str = "ensemble",
         use_gpu: bool = False,
         random_state: int = 42,
@@ -837,12 +838,13 @@ class YieldPredictor:
         Initialize yield predictor.
 
         Args:
-            crop: Crop type
+            crop: Crop type (alias for crop_type)
+            crop_type: Crop type
             model_type: Model type to use
             use_gpu: Use GPU acceleration
             random_state: Random seed
         """
-        self.crop = crop
+        self.crop = crop_type if crop_type is not None else (crop if crop is not None else "corn")
         self.model_type = model_type
         self.use_gpu = use_gpu
         self.random_state = random_state
@@ -850,6 +852,15 @@ class YieldPredictor:
         self._model: Optional[BaseYieldModel] = None
         self._feature_names: Optional[List[str]] = None
         self._is_fitted = False
+
+        # Crop-specific base yields (kg/ha) for quick estimation
+        self._base_yields = {
+            "corn": 10000,
+            "wheat": 6000,
+            "soybean": 3500,
+            "rice": 7000,
+            "cotton": 1200,
+        }
 
     def fit(
         self,
@@ -907,19 +918,23 @@ class YieldPredictor:
 
     def predict(
         self,
-        X: np.ndarray,
+        X: Union[np.ndarray, Dict[str, float]],
         return_confidence: bool = False,
-    ) -> Union[np.ndarray, PredictionResult]:
+    ) -> Union[float, np.ndarray, PredictionResult]:
         """
         Generate yield predictions.
 
         Args:
-            X: Feature matrix
+            X: Feature matrix or dict of features
             return_confidence: Return confidence intervals
 
         Returns:
             Predictions or PredictionResult
         """
+        # Handle dict input for quick estimation
+        if isinstance(X, dict):
+            return self._quick_estimate(X)
+
         if not self._is_fitted:
             raise ValueError("Predictor not fitted. Call fit() first.")
 
@@ -930,6 +945,45 @@ class YieldPredictor:
             if return_confidence:
                 return PredictionResult(predictions=predictions)
             return predictions
+
+    def _quick_estimate(self, features: Dict[str, float]) -> float:
+        """
+        Quick yield estimation from feature dict.
+
+        Uses simple empirical relationships for rapid estimation.
+
+        Args:
+            features: Dict with keys like 'gdd', 'precipitation', etc.
+
+        Returns:
+            Estimated yield (kg/ha)
+        """
+        base_yield = self._base_yields.get(self.crop, 8000)
+
+        # GDD factor
+        gdd = features.get('gdd', 1200)
+        gdd_optimal = 1400  # Optimal GDD for most crops
+        gdd_factor = min(gdd / gdd_optimal, 1.2)
+
+        # Water factor
+        precip = features.get('precipitation', 500)
+        precip_optimal = 600
+        water_factor = min(precip / precip_optimal, 1.1)
+
+        # Radiation factor
+        radiation = features.get('solar_radiation', 4000)
+        rad_optimal = 4500
+        rad_factor = min(radiation / rad_optimal, 1.1)
+
+        # Nitrogen factor
+        nitrogen = features.get('nitrogen', 150)
+        n_optimal = 200
+        n_factor = min(nitrogen / n_optimal, 1.0)
+
+        # Combined estimate
+        yield_estimate = base_yield * gdd_factor * water_factor * rad_factor * n_factor
+
+        return float(yield_estimate)
 
     def score(self, X: np.ndarray, y: np.ndarray) -> ModelMetrics:
         """Calculate model performance metrics."""
@@ -942,6 +996,75 @@ class YieldPredictor:
         if hasattr(self._model, "get_feature_importance"):
             return self._model.get_feature_importance()
         return None
+
+
+class WaterStressFactor:
+    """
+    Water stress factor calculator.
+
+    Calculates water stress impact on crop yield based on
+    precipitation and evapotranspiration.
+
+    Example:
+        >>> wsf = WaterStressFactor(crop_type='corn')
+        >>> factor = wsf.calculate(precipitation=400, et_potential=500)
+    """
+
+    def __init__(
+        self,
+        crop_type: str = "corn",
+        sensitivity: float = 1.0,
+    ):
+        """
+        Initialize water stress calculator.
+
+        Args:
+            crop_type: Type of crop
+            sensitivity: Stress sensitivity factor
+        """
+        self.crop_type = crop_type
+        self.sensitivity = sensitivity
+
+        # Crop-specific water requirements
+        self._crop_kc = {
+            "corn": 1.2,
+            "wheat": 1.0,
+            "soybean": 1.1,
+            "rice": 1.3,
+            "cotton": 1.15,
+        }
+
+    def calculate(
+        self,
+        precipitation: float,
+        et_potential: float,
+        irrigation: float = 0,
+    ) -> float:
+        """
+        Calculate water stress factor.
+
+        Args:
+            precipitation: Seasonal precipitation (mm)
+            et_potential: Potential evapotranspiration (mm)
+            irrigation: Irrigation amount (mm)
+
+        Returns:
+            Stress factor (0-1, 1 = no stress)
+        """
+        kc = self._crop_kc.get(self.crop_type, 1.0)
+        et_crop = et_potential * kc
+
+        total_water = precipitation + irrigation
+        water_ratio = total_water / et_crop if et_crop > 0 else 1.0
+
+        if water_ratio >= 1.0:
+            return 1.0
+        elif water_ratio < 0.3:
+            return 0.3
+        else:
+            # Exponential stress response
+            stress = water_ratio ** self.sensitivity
+            return max(0.3, min(1.0, stress))
 
 
 class YieldModel:

@@ -133,11 +133,38 @@ class IrrigationScheduler:
         >>> schedule = scheduler.generate_schedule(days=7)
     """
 
-    def __init__(self):
-        """Initialize irrigation scheduler."""
+    def __init__(
+        self,
+        soil_type: str = None,
+        crop_type: str = None,
+        area_ha: float = None,
+    ):
+        """
+        Initialize irrigation scheduler.
+
+        Args:
+            soil_type: Default soil type for zones
+            crop_type: Default crop type for zones
+            area_ha: Default area for main zone
+        """
         self._zones: Dict[str, IrrigationZone] = {}
         self._events: List[IrrigationEvent] = []
         self._event_counter = 0
+
+        # Store defaults
+        self._default_soil = soil_type or "loam"
+        self._default_crop = crop_type or "corn"
+        self._default_area = area_ha or 1.0
+
+        # Create default zone if parameters provided
+        if soil_type is not None or crop_type is not None or area_ha is not None:
+            self.add_zone(
+                "main",
+                name="Main Zone",
+                area=self._default_area,
+                crop=self._default_crop,
+                soil_type=self._default_soil,
+            )
 
         # Crop coefficients (Kc) by growth stage
         self._crop_kc = {
@@ -248,6 +275,128 @@ class IrrigationScheduler:
             net_requirement_mm=net_req,
             gross_requirement_mm=gross_req,
         )
+
+    def calculate_requirement(
+        self,
+        et_reference: float,
+        days: int = 7,
+        rainfall: float = 0.0,
+    ) -> Dict[str, float]:
+        """
+        Calculate total irrigation requirement for the forecast period.
+
+        Args:
+            et_reference: Daily reference ET (mm/day)
+            days: Forecast period (days)
+            rainfall: Expected rainfall (mm)
+
+        Returns:
+            Dict with requirement details
+        """
+        # Get main zone or first available zone
+        if "main" in self._zones:
+            zone = self._zones["main"]
+        elif self._zones:
+            zone = list(self._zones.values())[0]
+        else:
+            # Create default zone if none exists
+            zone = self.add_zone(
+                "main",
+                name="Main Zone",
+                area=self._default_area,
+                crop=self._default_crop,
+                soil_type=self._default_soil,
+            )
+
+        # Get crop coefficient
+        crop_kc = self._crop_kc.get(zone.crop.lower(), self._crop_kc["default"])
+        kc = crop_kc.get("mid", 1.0)
+
+        # Calculate requirements
+        daily_etc = et_reference * kc
+        total_et = daily_etc * days
+
+        # Effective rainfall
+        if rainfall < 5:
+            effective_rain = 0
+        elif rainfall > 75:
+            effective_rain = rainfall * 0.6
+        else:
+            effective_rain = rainfall * 0.8
+
+        net_req = max(0, total_et - effective_rain)
+        gross_req = net_req / zone.efficiency if zone.efficiency > 0 else net_req
+        volume_m3 = zone.area * 10 * gross_req
+
+        return {
+            "daily_etc": daily_etc,
+            "total_et": total_et,
+            "effective_rainfall": effective_rain,
+            "net_requirement": net_req,
+            "gross_requirement": gross_req,
+            "volume_m3": volume_m3,
+            "days": days,
+        }
+
+    def recommend(
+        self,
+        current_depletion: float,
+        forecast_et: List[float],
+        forecast_precip: List[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate irrigation recommendation based on current state and forecast.
+
+        Args:
+            current_depletion: Current soil water depletion (mm)
+            forecast_et: List of daily ET forecast values (mm/day)
+            forecast_precip: List of daily precipitation forecast (mm/day)
+
+        Returns:
+            Dict with irrigation recommendation
+        """
+        if forecast_precip is None:
+            forecast_precip = [0] * len(forecast_et)
+
+        # Get zone
+        if "main" in self._zones:
+            zone = self._zones["main"]
+        elif self._zones:
+            zone = list(self._zones.values())[0]
+        else:
+            zone = self.add_zone(
+                "main", name="Main Zone", area=self._default_area,
+                crop=self._default_crop, soil_type=self._default_soil,
+            )
+
+        # Calculate forecast totals
+        total_et = sum(forecast_et)
+        total_precip = sum(forecast_precip)
+        net_demand = total_et - total_precip * 0.8  # 80% effective rain
+
+        # Current available water
+        taw = 100  # Approximate total available water (mm)
+        mad = zone.allowed_deficit * taw
+
+        # Future deficit
+        projected_deficit = current_depletion + net_demand
+
+        # Recommend if deficit exceeds MAD
+        if projected_deficit > mad:
+            amount = projected_deficit  # Refill to field capacity
+            urgent = current_depletion > mad
+        else:
+            amount = 0
+            urgent = False
+
+        return {
+            "irrigate": amount > 0,
+            "amount_mm": amount,
+            "volume_m3": zone.area * 10 * amount,
+            "urgency": "high" if urgent else "normal",
+            "forecast_deficit": projected_deficit,
+            "threshold_mm": mad,
+        }
 
     def schedule_irrigation(
         self,
